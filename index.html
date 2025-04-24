@@ -21,6 +21,7 @@
         dt { font-weight: bold; margin-top: 5px; }
         dd { margin-left: 20px; margin-bottom: 5px; }
         ul { margin-top: 5px; padding-left: 20px; }
+        .note { background-color: #fffde7; padding: 10px; border-left: 4px solid #ffeb3b; margin: 10px 0; }
     </style>
 </head>
 <body>
@@ -30,6 +31,10 @@
         Enter a chemical identifier (CAS RN like "67-64-1" or DTXSID like "DTXSID7020182") and click Fetch.
         <br><strong>Requires a free API key from EPA. See code comments to add your key.</strong>
     </p>
+    <div class="note">
+        <p><strong>Note:</strong> This demo uses a CORS proxy (corsproxy.io) to allow API calls from GitHub Pages. 
+        For production use, consider implementing a server-side solution instead.</p>
+    </div>
 
     <div>
         <label for="chemIdInput">Chemical Identifier (CAS RN or DTXSID):</label>
@@ -90,6 +95,9 @@
 
         // Updated Base URL for EPA CompTox Dashboard API
         const API_BASE_URL = 'https://api-ccte.epa.gov/data-resolver/v1';
+
+        // CORS Proxy to allow API calls from GitHub Pages
+        const CORS_PROXY = "https://corsproxy.io/?";
 
         // --- GHS Pictogram Mapping ---
         const pictogramMap = {
@@ -203,9 +211,9 @@
                 const physChemData = await makeApiCall('PhysChem_Data', physChemUrl, fetchedJsonResponses);
                 displayPhysChemInfo(physChemData);
 
-                // Set chemical structure image
+                // Set chemical structure image - using CORS proxy for image as well
                 const imageUrl = `${API_BASE_URL}/chemicals/structure-image/${dtxsid}`;
-                detailsImage.src = imageUrl;
+                detailsImage.src = CORS_PROXY + encodeURIComponent(imageUrl);
                 detailsImage.style.display = 'block';
                 detailsImage.onerror = () => { 
                     detailsImage.style.display = 'none';
@@ -229,7 +237,10 @@
 
         async function makeApiCall(callName, url, jsonStorage) {
             try {
-                const response = await fetch(url, {
+                // Use CORS proxy to avoid CORS issues with the EPA API
+                const proxiedUrl = CORS_PROXY + encodeURIComponent(url);
+                
+                const response = await fetch(proxiedUrl, {
                     headers: {
                         'x-api-key': EPA_API_KEY,
                         'Accept': 'application/json'
