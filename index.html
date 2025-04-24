@@ -1,122 +1,490 @@
-// --- Configuration ---
-// !!! REPLACE WITH YOUR ACTUAL EPA CTX API KEY !!!
-const EPA_API_KEY = '911f31a4-e14f-4d02-bf0d-c3035a817f59';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EPA CompTox API Example</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 900px; margin: auto; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"] { padding: 8px; margin-bottom: 10px; width: 250px; border: 1px solid #ccc; }
+        button { padding: 10px 15px; cursor: pointer; background-color: #0071bc; color: white; border: none; border-radius: 4px; }
+        button:hover { background-color: #005a9c; }
+        .results, .raw-json { margin-top: 20px; border: 1px solid #ccc; padding: 15px; background-color: #f9f9f9; border-radius: 4px; }
+        .results h2, .raw-json h3 { margin-top: 0; color: #005a9c; }
+        .error { color: red; font-weight: bold; margin-top: 10px; }
+        .loading { font-style: italic; color: #555; margin-top: 10px; }
+        .pictogram-list img { max-width: 50px; margin: 5px; vertical-align: middle; background-color: white; padding: 2px; border: 1px solid #eee; }
+        .pictogram-list span { display: inline-block; margin: 5px; padding: 5px; border: 1px solid #eee; background-color: #fff; font-family: monospace; }
+        pre { background-color: #eee; padding: 10px; border: 1px solid #ddd; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 0.9em; }
+        code { font-family: monospace; }
+        dt { font-weight: bold; margin-top: 5px; }
+        dd { margin-left: 20px; margin-bottom: 5px; }
+        ul { margin-top: 5px; padding-left: 20px; }
+    </style>
+</head>
+<body>
 
-// Updated Base URL - EPA CompTox Dashboard API
-const API_BASE_URL = 'https://api-ccte.epa.gov/data-resolver/v1';
+    <h1>EPA CompTox Chemicals Dashboard API Example</h1>
+    <p>
+        Enter a chemical identifier (CAS RN like "67-64-1" or DTXSID like "DTXSID7020182") and click Fetch.
+        <br><strong>Requires a free API key from EPA. See code comments to add your key.</strong>
+    </p>
 
-// API Endpoints
-async function fetchData() {
-    const identifier = chemIdInput.value.trim();
-    if (!identifier) {
-        showError("Please enter a CAS RN or DTXSID.");
-        return;
-    }
-    if (EPA_API_KEY === 'YOUR_API_KEY_HERE') {
-        showError("Please add your EPA CTX API Key to the JavaScript code first.");
-        return;
-    }
+    <div>
+        <label for="chemIdInput">Chemical Identifier (CAS RN or DTXSID):</label>
+        <input type="text" id="chemIdInput" placeholder="e.g., 67-64-1 or DTXSID7020182">
+        <button id="fetchButton">Fetch Data</button>
+    </div>
 
-    clearPreviousResults();
-    statusDiv.style.display = 'block';
-    resultIdentifierSpan.textContent = identifier;
-    jsonOutputDiv.innerHTML = ''; // Clear previous JSON
+    <div id="status" class="loading" style="display: none;">Loading...</div>
+    <div id="error" class="error" style="display: none;"></div>
 
-    let dtxsid = null;
-    let fetchedJsonResponses = {}; // Store JSON responses
+    <div id="results" class="results" style="display: none;">
+        <h2>Results for: <span id="resultIdentifier"></span></h2>
 
-    try {
-        // Step 1: Determine identifier type and get DTXSID if necessary
-        if (identifier.toUpperCase().startsWith('DTXSID')) {
-            dtxsid = identifier.toUpperCase();
-        } else if (identifier.includes('-')) { // Assume CAS RN if it contains hyphens
-            statusDiv.textContent = `Looking up DTXSID for CAS RN: ${identifier}...`;
+        <div id="chemDetails">
+            <h3>Chemical Details</h3>
+            <dl>
+                <dt>DTXSID:</dt><dd id="detailsDtxsid">N/A</dd>
+                <dt>Preferred Name:</dt><dd id="detailsName">N/A</dd>
+                <dt>Formula:</dt><dd id="detailsFormula">N/A</dd>
+                <dt>Average Mass:</dt><dd id="detailsAvgMass">N/A</dd>
+                <dt>Monoisotopic Mass:</dt><dd id="detailsMonoMass">N/A</dd>
+                <dt>Structure:</dt><dd><img id="detailsImage" src="" alt="Chemical structure" style="max-width: 200px; display: none;"></dd>
+            </dl>
+        </div>
+
+        <div id="hazardInfo">
+            <h3>GHS Hazard Information (if available)</h3>
+            <div>
+                <strong>Pictograms:</strong>
+                <div id="ghsPictograms" class="pictogram-list">N/A</div>
+            </div>
+            <div>
+                <strong>H-Statements:</strong>
+                <ul id="ghsHStatements"><li>N/A</li></ul>
+            </div>
+        </div>
+
+        <div id="physChemInfo">
+            <h3>Selected Physicochemical Properties (if available)</h3>
+            <dl>
+                 <dt>LogP (Octanol-Water Partition Coeff.):</dt><dd id="propLogP">N/A</dd>
+                 <dt>Water Solubility:</dt><dd id="propWaterSol">N/A</dd>
+                 <dt>Boiling Point:</dt><dd id="propBoilingPt">N/A</dd>
+                 <dt>Melting Point:</dt><dd id="propMeltingPt">N/A</dd>
+            </dl>
+        </div>
+    </div>
+
+    <div id="rawJsonDisplay" class="raw-json" style="display: none;">
+         <h3>Raw API JSON Responses</h3>
+         <div id="jsonOutput"></div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        // !!! REPLACE 'YOUR_API_KEY_HERE' WITH YOUR ACTUAL EPA CTX API KEY !!!
+        const EPA_API_KEY = '911f31a4-e14f-4d02-bf0d-c3035a817f59';
+
+        // Updated Base URL for EPA CompTox Dashboard API
+        const API_BASE_URL = 'https://api-ccte.epa.gov/data-resolver/v1';
+
+        // --- GHS Pictogram Mapping ---
+        const pictogramMap = {
+            "GHS01": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/GHS-pictogram-explos.svg/100px-GHS-pictogram-explos.svg.png", alt: "Exploding Bomb"},
+            "GHS02": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d8/GHS-pictogram-flamme.svg/100px-GHS-pictogram-flamme.svg.png", alt: "Flame"},
+            "GHS03": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/35/GHS-pictogram-rondflam.svg/100px-GHS-pictogram-rondflam.svg.png", alt: "Flame over Circle"},
+            "GHS04": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/GHS-pictogram-bottle.svg/100px-GHS-pictogram-bottle.svg.png", alt: "Gas Cylinder"},
+            "GHS05": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/GHS-pictogram-acid.svg/100px-GHS-pictogram-acid.svg.png", alt: "Corrosion"},
+            "GHS06": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/GHS-pictogram-skull.svg/100px-GHS-pictogram-skull.svg.png", alt: "Skull and Crossbones"},
+            "GHS07": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/GHS-pictogram-exclam.svg/100px-GHS-pictogram-exclam.svg.png", alt: "Exclamation Mark"},
+            "GHS08": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/GHS-pictogram-silhouet.svg/100px-GHS-pictogram-silhouet.svg.png", alt: "Health Hazard"},
+            "GHS09": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1f/GHS-pictogram-pollu.svg/100px-GHS-pictogram-pollu.svg.png", alt: "Environment"}
+        };
+        // --- End Configuration ---
+
+        const chemIdInput = document.getElementById('chemIdInput');
+        const fetchButton = document.getElementById('fetchButton');
+        const statusDiv = document.getElementById('status');
+        const errorDiv = document.getElementById('error');
+        const resultsDiv = document.getElementById('results');
+        const rawJsonDisplayDiv = document.getElementById('rawJsonDisplay');
+        const jsonOutputDiv = document.getElementById('jsonOutput');
+        const resultIdentifierSpan = document.getElementById('resultIdentifier');
+
+        // Result display elements
+        const detailsDtxsid = document.getElementById('detailsDtxsid');
+        const detailsName = document.getElementById('detailsName');
+        const detailsFormula = document.getElementById('detailsFormula');
+        const detailsAvgMass = document.getElementById('detailsAvgMass');
+        const detailsMonoMass = document.getElementById('detailsMonoMass');
+        const detailsImage = document.getElementById('detailsImage');
+        const ghsPictogramsDiv = document.getElementById('ghsPictograms');
+        const ghsHStatementsUl = document.getElementById('ghsHStatements');
+        const propLogP = document.getElementById('propLogP');
+        const propWaterSol = document.getElementById('propWaterSol');
+        const propBoilingPt = document.getElementById('propBoilingPt');
+        const propMeltingPt = document.getElementById('propMeltingPt');
+
+        fetchButton.addEventListener('click', fetchData);
+
+        async function fetchData() {
+            const identifier = chemIdInput.value.trim();
+            if (!identifier) {
+                showError("Please enter a CAS RN or DTXSID.");
+                return;
+            }
+            if (EPA_API_KEY === 'YOUR_API_KEY_HERE') {
+                 showError("Please add your EPA CTX API Key to the JavaScript code first.");
+                 return;
+            }
+
+            clearPreviousResults();
+            statusDiv.style.display = 'block';
+            resultIdentifierSpan.textContent = identifier;
+            jsonOutputDiv.innerHTML = ''; // Clear previous JSON
+
+            let dtxsid = null;
+            let fetchedJsonResponses = {}; // Store JSON responses
+
+            try {
+                // Step 1: Determine identifier type and get DTXSID if necessary
+                if (identifier.toUpperCase().startsWith('DTXSID')) {
+                    dtxsid = identifier.toUpperCase();
+                } else if (identifier.includes('-')) { // Assume CAS RN if it contains hyphens
+                    statusDiv.textContent = `Looking up DTXSID for CAS RN: ${identifier}...`;
+                    
+                    // Endpoint to get DTXSID from CAS RN
+                    const searchUrl = `${API_BASE_URL}/chemicals/search/exactMatch/${encodeURIComponent(identifier)}`;
+                    const searchResponse = await makeApiCall('CAS_Search', searchUrl, fetchedJsonResponses);
+
+                    // Extract DTXSID from search response
+                    if (searchResponse && Array.isArray(searchResponse) && searchResponse.length > 0) {
+                        // Look for a record with a dtxsid field
+                        const found = searchResponse.find(item => item.dtxsid);
+                        if (found) {
+                            dtxsid = found.dtxsid;
+                        }
+                    } else if (searchResponse && searchResponse.dtxsid) {
+                        // Alternative structure where response is a single object
+                        dtxsid = searchResponse.dtxsid;
+                    }
+                    
+                    if (dtxsid) {
+                        statusDiv.textContent = `Found DTXSID: ${dtxsid}. Fetching details...`;
+                    } else {
+                        throw new Error(`Could not find DTXSID for CAS RN ${identifier}. Check the identifier and try again.`);
+                    }
+                } else {
+                    throw new Error("Invalid identifier format. Use CAS RN (e.g., 67-64-1) or DTXSID (e.g., DTXSID7020182).");
+                }
+
+                if (!dtxsid) {
+                     throw new Error("Failed to obtain DTXSID.");
+                }
+
+                // Step 2: Fetch Chemical Details using DTXSID
+                statusDiv.textContent = `Fetching Chemical Details for ${dtxsid}...`;
+                const detailsUrl = `${API_BASE_URL}/chemicals/details/${dtxsid}`;
+                const detailsData = await makeApiCall('Chemical_Details', detailsUrl, fetchedJsonResponses);
+                displayChemicalDetails(detailsData, dtxsid);
+
+                // Step 3: Fetch Hazard Data (including GHS) using DTXSID
+                statusDiv.textContent = `Fetching Hazard Data for ${dtxsid}...`;
+                const hazardUrl = `${API_BASE_URL}/chemicals/hazard-records/${dtxsid}`;
+                const hazardData = await makeApiCall('Hazard_Data', hazardUrl, fetchedJsonResponses);
+                displayHazardInfo(hazardData);
+
+                // Step 4: Fetch Physicochemical Property Data using DTXSID
+                statusDiv.textContent = `Fetching PhysChem Properties for ${dtxsid}...`;
+                const physChemUrl = `${API_BASE_URL}/chemicals/properties/${dtxsid}`;
+                const physChemData = await makeApiCall('PhysChem_Data', physChemUrl, fetchedJsonResponses);
+                displayPhysChemInfo(physChemData);
+
+                // Set chemical structure image
+                const imageUrl = `${API_BASE_URL}/chemicals/structure-image/${dtxsid}`;
+                detailsImage.src = imageUrl;
+                detailsImage.style.display = 'block';
+                detailsImage.onerror = () => { 
+                    detailsImage.style.display = 'none';
+                    console.log("Error loading chemical structure image");
+                };
+
+                resultsDiv.style.display = 'block'; // Show results section
+                rawJsonDisplayDiv.style.display = 'block'; // Show JSON section
+
+            } catch (error) {
+                showError(`Error: ${error.message}`);
+                console.error("Fetch error:", error);
+                if (Object.keys(fetchedJsonResponses).length > 0) {
+                    displayRawJson(fetchedJsonResponses); // Display JSON even if later calls fail
+                    rawJsonDisplayDiv.style.display = 'block';
+                }
+            } finally {
+                statusDiv.style.display = 'none'; // Hide loading message
+            }
+        }
+
+        async function makeApiCall(callName, url, jsonStorage) {
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'x-api-key': EPA_API_KEY,
+                        'Accept': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    let errorMessage = `API call '${callName}' failed: ${response.status} ${response.statusText}`;
+                    try {
+                        const errorText = await response.text();
+                        errorMessage += `. Response: ${errorText}`;
+                    } catch (e) {
+                        console.error("Could not read error response text", e);
+                    }
+                    throw new Error(errorMessage);
+                }
+
+                const data = await response.json();
+                jsonStorage[callName] = data; // Store successful response
+                return data;
+            } catch (error) {
+                jsonStorage[callName] = { error: error.message }; // Store error info
+                throw error; // Re-throw to stop subsequent calls if needed
+            }
+        }
+
+        function displayChemicalDetails(data, dtxsid) {
+            if (!data) {
+                detailsDtxsid.textContent = dtxsid || 'N/A'; // Show dtxsid even if details fail
+                detailsName.textContent = 'Error fetching details';
+                return;
+            }
+
+            // Handle different potential response structures
+            detailsDtxsid.textContent = data.dtxsid || dtxsid || 'N/A';
             
-            // CORRECTED: Endpoint to get DTXSID from CAS RN
-            const searchUrl = `${API_BASE_URL}/chemicals/search/exactMatch/${encodeURIComponent(identifier)}`;
-            const searchResponse = await makeApiCall('CAS_Search', searchUrl, fetchedJsonResponses);
-
-            // Extract DTXSID from search response
-            if (searchResponse && Array.isArray(searchResponse) && searchResponse.length > 0 && searchResponse[0].dtxsid) {
-                dtxsid = searchResponse[0].dtxsid;
-                statusDiv.textContent = `Found DTXSID: ${dtxsid}. Fetching details...`;
-            } else if (searchResponse && searchResponse.dtxsid) {
-                dtxsid = searchResponse.dtxsid;
-                statusDiv.textContent = `Found DTXSID: ${dtxsid}. Fetching details...`;
+            // Check for name in various possible locations in the response
+            if (data.preferredName) {
+                detailsName.textContent = data.preferredName;
+            } else if (data.chemicalName) {
+                detailsName.textContent = data.chemicalName;
+            } else if (data.name) {
+                detailsName.textContent = data.name;
             } else {
-                throw new Error(`Could not find DTXSID for CAS RN ${identifier}. Response: ${JSON.stringify(searchResponse)}`);
+                detailsName.textContent = 'N/A';
             }
-        } else {
-            throw new Error("Invalid identifier format. Use CAS RN (e.g., 67-64-1) or DTXSID (e.g., DTXSID7020182).");
-        }
-
-        if (!dtxsid) {
-            throw new Error("Failed to obtain DTXSID.");
-        }
-
-        // Step 2: Fetch Chemical Details using DTXSID
-        statusDiv.textContent = `Fetching Chemical Details for ${dtxsid}...`;
-        
-        // CORRECTED: Endpoint for chemical details
-        const detailsUrl = `${API_BASE_URL}/chemicals/details/${dtxsid}`;
-        const detailsData = await makeApiCall('Chemical_Details', detailsUrl, fetchedJsonResponses);
-        displayChemicalDetails(detailsData, dtxsid);
-
-        // Step 3: Fetch Hazard Data (including GHS) using DTXSID
-        statusDiv.textContent = `Fetching Hazard Data for ${dtxsid}...`;
-        
-        // CORRECTED: Endpoint for hazard data
-        const hazardUrl = `${API_BASE_URL}/chemicals/hazard-records/${dtxsid}`;
-        const hazardData = await makeApiCall('Hazard_Data', hazardUrl, fetchedJsonResponses);
-        displayHazardInfo(hazardData);
-
-        // Step 4: Fetch Physicochemical Property Data using DTXSID
-        statusDiv.textContent = `Fetching PhysChem Properties for ${dtxsid}...`;
-        
-        // CORRECTED: Endpoint for physicochemical properties
-        const physChemUrl = `${API_BASE_URL}/chemicals/properties/${dtxsid}`;
-        const physChemData = await makeApiCall('PhysChem_Data', physChemUrl, fetchedJsonResponses);
-        displayPhysChemInfo(physChemData);
-
-        // CORRECTED: Chemical structure image URL
-        const imageUrl = `${API_BASE_URL}/chemicals/structure-image/${dtxsid}`;
-        detailsImage.src = imageUrl;
-        detailsImage.style.display = 'block';
-        detailsImage.onerror = () => { detailsImage.style.display = 'none'; }
-
-        resultsDiv.style.display = 'block'; // Show results section
-        rawJsonDisplayDiv.style.display = 'block'; // Show JSON section
-
-    } catch (error) {
-        showError(`Error: ${error.message}`);
-        console.error("Fetch error:", error);
-        displayRawJson(fetchedJsonResponses); // Display JSON even if later calls fail
-        rawJsonDisplayDiv.style.display = 'block';
-    } finally {
-        statusDiv.style.display = 'none'; // Hide loading message
-    }
-}
-
-// Improved API call function with better error handling
-async function makeApiCall(callName, url, jsonStorage) {
-    try {
-        const response = await fetch(url, {
-            headers: {
-                'x-api-key': EPA_API_KEY,
-                'Accept': 'application/json'
+            
+            // Formula could be in different fields
+            if (data.molecularFormula) {
+                detailsFormula.textContent = data.molecularFormula;
+            } else if (data.formula) {
+                detailsFormula.textContent = data.formula;
+            } else {
+                detailsFormula.textContent = 'N/A';
             }
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API call '${callName}' failed: ${response.status} ${response.statusText}. Response: ${errorText}`);
+            
+            // Mass values with proper formatting
+            if (data.averageMass || data.averageMolecularWeight) {
+                const mass = data.averageMass || data.averageMolecularWeight;
+                detailsAvgMass.textContent = typeof mass === 'number' ? `${mass.toFixed(4)} g/mol` : `${mass} g/mol`;
+            } else {
+                detailsAvgMass.textContent = 'N/A';
+            }
+            
+            if (data.monoisotopicMass) {
+                detailsMonoMass.textContent = typeof data.monoisotopicMass === 'number' ? 
+                    `${data.monoisotopicMass.toFixed(4)} g/mol` : `${data.monoisotopicMass} g/mol`;
+            } else {
+                detailsMonoMass.textContent = 'N/A';
+            }
         }
 
-        const data = await response.json();
-        jsonStorage[callName] = data; // Store successful response
-        return data;
-    } catch (error) {
-        jsonStorage[callName] = { error: error.message }; // Store error info
-        throw error; // Re-throw to stop subsequent calls if needed
-    }
-}
+        function displayHazardInfo(data) {
+            if (!data) {
+                ghsPictogramsDiv.textContent = 'Error fetching hazard data.';
+                ghsHStatementsUl.innerHTML = '<li>Error fetching hazard data.</li>';
+                return;
+            }
+
+            // Parse GHS data based on potential response structures
+            let pictograms = [];
+            let hStatements = [];
+
+            // Handle array of hazard records
+            if (Array.isArray(data)) {
+                // Look for GHS pictogram codes
+                data.forEach(record => {
+                    // Look for pictogram codes
+                    if (record.ghsPictogram || record.pictogram || record.pictogramCode) {
+                        const code = record.ghsPictogram || record.pictogram || record.pictogramCode;
+                        if (code && code.startsWith('GHS')) {
+                            pictograms.push(code);
+                        }
+                    }
+                    
+                    // Look for H-statements
+                    if (record.hStatement || record.hazardStatement) {
+                        const stmt = record.hStatement || record.hazardStatement;
+                        if (stmt && (stmt.startsWith('H') || stmt.startsWith('h'))) {
+                            hStatements.push(stmt);
+                        }
+                    }
+                });
+            } 
+            // Handle object with hazard data
+            else if (data.ghs) {
+                pictograms = data.ghs.pictograms || [];
+                hStatements = data.ghs.hStatements || data.ghs.hazardStatements || [];
+            }
+            // Handle direct object structure
+            else if (data.pictograms || data.hazardStatements || data.hStatements) {
+                pictograms = data.pictograms || [];
+                hStatements = data.hazardStatements || data.hStatements || [];
+            }
+
+            // Display Pictograms
+            const uniquePictograms = [...new Set(pictograms)];
+            if (uniquePictograms.length > 0) {
+                ghsPictogramsDiv.innerHTML = ''; // Clear default
+                uniquePictograms.forEach(code => {
+                    const pictogramInfo = pictogramMap[code];
+                    if (pictogramInfo) {
+                        const img = document.createElement('img');
+                        img.src = pictogramInfo.url;
+                        img.alt = pictogramInfo.alt;
+                        img.title = `${code}: ${pictogramInfo.alt}`;
+                        ghsPictogramsDiv.appendChild(img);
+                    } else {
+                        const span = document.createElement('span');
+                        span.textContent = code;
+                        span.title = "Unmapped GHS Code";
+                        ghsPictogramsDiv.appendChild(span);
+                    }
+                });
+            } else {
+                ghsPictogramsDiv.textContent = 'No GHS pictograms found.';
+            }
+
+            // Display H-Statements
+            const uniqueHStatements = [...new Set(hStatements)];
+            if (uniqueHStatements.length > 0) {
+                ghsHStatementsUl.innerHTML = ''; // Clear default
+                uniqueHStatements.forEach(stmt => {
+                    const li = document.createElement('li');
+                    li.textContent = stmt;
+                    ghsHStatementsUl.appendChild(li);
+                });
+            } else {
+                ghsHStatementsUl.innerHTML = '<li>No GHS H-statements found.</li>';
+            }
+        }
+
+        function displayPhysChemInfo(data) {
+            if (!data) {
+                propLogP.textContent = 'Error fetching property data.';
+                propWaterSol.textContent = 'N/A';
+                propBoilingPt.textContent = 'N/A';
+                propMeltingPt.textContent = 'N/A';
+                return;
+            }
+
+            // Helper function to find property by name or alias
+            const findProperty = (properties, nameOrAliases) => {
+                if (!Array.isArray(properties)) return null;
+                
+                // Convert nameOrAliases to array if it's not
+                const aliasArray = Array.isArray(nameOrAliases) ? nameOrAliases : [nameOrAliases];
+                
+                // Try to find a property that matches one of the aliases
+                for (const prop of properties) {
+                    const propName = prop.name || prop.propertyName || '';
+                    if (aliasArray.some(alias => 
+                        propName.toLowerCase().includes(alias.toLowerCase()))) {
+                        return prop;
+                    }
+                }
+                return null;
+            };
+
+            // Helper to format property value with units
+            const formatPropertyValue = (prop) => {
+                if (!prop) return 'N/A';
+                
+                const value = prop.value || prop.propertyValue;
+                const units = prop.units || prop.propertyUnits || '';
+                
+                if (value === undefined || value === null) return 'N/A';
+                
+                return units ? `${value} ${units}` : `${value}`;
+            };
+
+            // Find and display LogP
+            const logPProp = findProperty(data, ['logP', 'log P', 'partition', 'octanol']);
+            propLogP.textContent = formatPropertyValue(logPProp);
+
+            // Find and display Water Solubility
+            const waterSolProp = findProperty(data, ['water sol', 'aqueous sol', 'solubility in water']);
+            propWaterSol.textContent = formatPropertyValue(waterSolProp);
+
+            // Find and display Boiling Point
+            const boilingPtProp = findProperty(data, ['boiling', 'boil pt', 'boil point']);
+            propBoilingPt.textContent = formatPropertyValue(boilingPtProp);
+
+            // Find and display Melting Point
+            const meltingPtProp = findProperty(data, ['melting', 'melt pt', 'melt point']);
+            propMeltingPt.textContent = formatPropertyValue(meltingPtProp);
+        }
+
+        function displayRawJson(jsonData) {
+            jsonOutputDiv.innerHTML = ''; // Clear previous
+            for (const key in jsonData) {
+                const section = document.createElement('div');
+                const heading = document.createElement('h4');
+                heading.textContent = `Response from: ${key.replace(/_/g, ' ')}`; // Make key readable
+                const pre = document.createElement('pre');
+                const code = document.createElement('code');
+                code.textContent = JSON.stringify(jsonData[key], null, 2); // Pretty print JSON
+                pre.appendChild(code);
+                section.appendChild(heading);
+                section.appendChild(pre);
+                jsonOutputDiv.appendChild(section);
+            }
+        }
+
+        function clearPreviousResults() {
+            resultsDiv.style.display = 'none';
+            rawJsonDisplayDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+            errorDiv.textContent = '';
+            jsonOutputDiv.innerHTML = '';
+
+            // Clear result fields
+            resultIdentifierSpan.textContent = '';
+            detailsDtxsid.textContent = 'N/A';
+            detailsName.textContent = 'N/A';
+            detailsFormula.textContent = 'N/A';
+            detailsAvgMass.textContent = 'N/A';
+            detailsMonoMass.textContent = 'N/A';
+            detailsImage.src = '';
+            detailsImage.style.display = 'none';
+            ghsPictogramsDiv.innerHTML = 'N/A';
+            ghsHStatementsUl.innerHTML = '<li>N/A</li>';
+            propLogP.textContent = 'N/A';
+            propWaterSol.textContent = 'N/A';
+            propBoilingPt.textContent = 'N/A';
+            propMeltingPt.textContent = 'N/A';
+        }
+
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            statusDiv.style.display = 'none'; // Hide loading on error
+        }
+
+    </script>
+
+</body>
+</html>
