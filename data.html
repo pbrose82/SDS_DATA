@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EPA CompTox API Example</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 900px; margin: auto; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"] { padding: 8px; margin-bottom: 10px; width: 250px; border: 1px solid #ccc; }
+        button { padding: 10px 15px; cursor: pointer; background-color: #0071bc; color: white; border: none; border-radius: 4px; }
+        button:hover { background-color: #005a9c; }
+        .results, .raw-json { margin-top: 20px; border: 1px solid #ccc; padding: 15px; background-color: #f9f9f9; border-radius: 4px; }
+        .results h2, .raw-json h3 { margin-top: 0; color: #005a9c; }
+        .error { color: red; font-weight: bold; margin-top: 10px; }
+        .loading { font-style: italic; color: #555; margin-top: 10px; }
+        .pictogram-list img { max-width: 50px; margin: 5px; vertical-align: middle; background-color: white; padding: 2px; border: 1px solid #eee; }
+        .pictogram-list span { display: inline-block; margin: 5px; padding: 5px; border: 1px solid #eee; background-color: #fff; font-family: monospace; }
+        pre { background-color: #eee; padding: 10px; border: 1px solid #ddd; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 0.9em; }
+        code { font-family: monospace; }
+        dt { font-weight: bold; margin-top: 5px; }
+        dd { margin-left: 20px; margin-bottom: 5px; }
+        ul { margin-top: 5px; padding-left: 20px; }
+    </style>
+</head>
+<body>
+
+    <h1>EPA CompTox Chemicals Dashboard API Example</h1>
+    <p>
+        Enter a chemical identifier (CAS RN like "67-64-1" or DTXSID like "DTXSID7020182") and click Fetch.
+        <br><strong>Requires a free API key from EPA. See code comments to add your key.</strong>
+        <br><strong>Note:</strong> API endpoints and JSON structures are based on documentation examples and might need adjustments based on current EPA CTX API specifications. Data availability varies per chemical.
+    </p>
+
+    <div>
+        <label for="chemIdInput">Chemical Identifier (CAS RN or DTXSID):</label>
+        <input type="text" id="chemIdInput" placeholder="e.g., 67-64-1 or DTXSID7020182">
+        <button id="fetchButton">Fetch Data</button>
+    </div>
+
+    <div id="status" class="loading" style="display: none;">Loading...</div>
+    <div id="error" class="error" style="display: none;"></div>
+
+    <div id="results" class="results" style="display: none;">
+        <h2>Results for: <span id="resultIdentifier"></span></h2>
+
+        <div id="chemDetails">
+            <h3>Chemical Details</h3>
+            <dl>
+                <dt>DTXSID:</dt><dd id="detailsDtxsid">N/A</dd>
+                <dt>Preferred Name:</dt><dd id="detailsName">N/A</dd>
+                <dt>Formula:</dt><dd id="detailsFormula">N/A</dd>
+                <dt>Average Mass:</dt><dd id="detailsAvgMass">N/A</dd>
+                <dt>Monoisotopic Mass:</dt><dd id="detailsMonoMass">N/A</dd>
+                <dt>Structure:</dt><dd><img id="detailsImage" src="" alt="Chemical structure" style="max-width: 200px; display: none;"></dd>
+            </dl>
+        </div>
+
+        <div id="hazardInfo">
+            <h3>GHS Hazard Information (if available)</h3>
+            <div>
+                <strong>Pictograms:</strong>
+                <div id="ghsPictograms" class="pictogram-list">N/A</div>
+            </div>
+            <div>
+                <strong>H-Statements:</strong>
+                <ul id="ghsHStatements"><li>N/A</li></ul>
+            </div>
+        </div>
+
+        <div id="physChemInfo">
+            <h3>Selected Physicochemical Properties (if available)</h3>
+            <dl>
+                 <dt>LogP (Octanol-Water Partition Coeff.):</dt><dd id="propLogP">N/A</dd>
+                 <dt>Water Solubility:</dt><dd id="propWaterSol">N/A</dd>
+                 <dt>Boiling Point:</dt><dd id="propBoilingPt">N/A</dd>
+                 <dt>Melting Point:</dt><dd id="propMeltingPt">N/A</dd>
+            </dl>
+        </div>
+         </div>
+
+    <div id="rawJsonDisplay" class="raw-json" style="display: none;">
+         <h3>Raw API JSON Responses</h3>
+         <div id="jsonOutput"></div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        // !!! REPLACE 'YOUR_API_KEY_HERE' WITH YOUR ACTUAL EPA CTX API KEY !!!
+        const EPA_API_KEY = '911f31a4-e14f-4d02-bf0d-c3035a817f59';
+
+        // !!! CONFIRM THE BASE URL FROM OFFICIAL EPA CTX API DOCUMENTATION !!!
+        // This is a placeholder structure based on common patterns.
+        // It might be something like https://api.epa.gov/ctx/..., https://api.cloud.gov/api/epa-ctx/... or similar
+        const API_BASE_URL = 'https://api-test.comptex.epa.gov/ctx'; // Example/Placeholder - VERIFY THIS!
+
+        // --- GHS Pictogram Mapping (Example - Needs more codes/verification) ---
+        const pictogramMap = {
+            "GHS01": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/GHS-pictogram-explos.svg/100px-GHS-pictogram-explos.svg.png", alt: "Exploding Bomb"},
+            "GHS02": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d8/GHS-pictogram-flamme.svg/100px-GHS-pictogram-flamme.svg.png", alt: "Flame"},
+            "GHS03": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/35/GHS-pictogram-rondflam.svg/100px-GHS-pictogram-rondflam.svg.png", alt: "Flame over Circle"},
+            "GHS04": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/GHS-pictogram-silhouette.svg/100px-GHS-pictogram-silhouette.svg.png", alt: "Gas Cylinder"}, // Corrected - was silhouette
+            "GHS05": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/GHS-pictogram-acid.svg/100px-GHS-pictogram-acid.svg.png", alt: "Corrosion"},
+            "GHS06": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/GHS-pictogram-skull.svg/100px-GHS-pictogram-skull.svg.png", alt: "Skull and Crossbones"},
+            "GHS07": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/GHS-pictogram-exclam.svg/100px-GHS-pictogram-exclam.svg.png", alt: "Exclamation Mark"},
+            "GHS08": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/GHS-pictogram-health.svg/100px-GHS-pictogram-health.svg.png", alt: "Health Hazard"}, // Corrected - was health/silhouette
+            "GHS09": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1f/GHS-pictogram-pollu.svg/100px-GHS-pictogram-pollu.svg.png", alt: "Environment"}
+        };
+        // --- End Configuration ---
+
+        const chemIdInput = document.getElementById('chemIdInput');
+        const fetchButton = document.getElementById('fetchButton');
+        const statusDiv = document.getElementById('status');
+        const errorDiv = document.getElementById('error');
+        const resultsDiv = document.getElementById('results');
+        const rawJsonDisplayDiv = document.getElementById('rawJsonDisplay');
+        const jsonOutputDiv = document.getElementById('jsonOutput');
+        const resultIdentifierSpan = document.getElementById('resultIdentifier');
+
+        // Result display elements
+        const detailsDtxsid = document.getElementById('detailsDtxsid');
+        const detailsName = document.getElementById('detailsName');
+        const detailsFormula = document.getElementById('detailsFormula');
+        const detailsAvgMass = document.getElementById('detailsAvgMass');
+        const detailsMonoMass = document.getElementById('detailsMonoMass');
+        const detailsImage = document.getElementById('detailsImage');
+        const ghsPictogramsDiv = document.getElementById('ghsPictograms');
+        const ghsHStatementsUl = document.getElementById('ghsHStatements');
+        const propLogP = document.getElementById('propLogP');
+        const propWaterSol = document.getElementById('propWaterSol');
+        const propBoilingPt = document.getElementById('propBoilingPt');
+        const propMeltingPt = document.getElementById('propMeltingPt');
+
+        fetchButton.addEventListener('click', fetchData);
+
+        async function fetchData() {
+            const identifier = chemIdInput.value.trim();
+            if (!identifier) {
+                showError("Please enter a CAS RN or DTXSID.");
+                return;
+            }
+            if (EPA_API_KEY === 'YOUR_API_KEY_HERE') {
+                 showError("Please add your EPA CTX API Key to the JavaScript code first.");
+                 return;
+            }
+
+            clearPreviousResults();
+            statusDiv.style.display = 'block';
+            resultIdentifierSpan.textContent = identifier;
+            jsonOutputDiv.innerHTML = ''; // Clear previous JSON
+
+            let dtxsid = null;
+            let fetchedJsonResponses = {}; // Store JSON responses
+
+            try {
+                // Step 1: Determine identifier type and get DTXSID if necessary
+                if (identifier.toUpperCase().startsWith('DTXSID')) {
+                    dtxsid = identifier.toUpperCase();
+                } else if (identifier.includes('-')) { // Assume CAS RN if it contains hyphens
+                    statusDiv.textContent = `Looking up DTXSID for CAS RN: ${identifier}...`;
+                    // --- Endpoint to get DTXSID from CAS RN ---
+                    // !!! VERIFY/ADJUST this endpoint path based on actual EPA CTX API documentation !!!
+                    const searchUrl = `${API_BASE_URL}/chemical/search/details/by-identifier/${encodeURIComponent(identifier)}`;
+                    const searchResponse = await makeApiCall('CAS_Search', searchUrl, fetchedJsonResponses);
+
+                    // --- Extract DTXSID ---
+                    // !!! Adjust this based on the actual JSON structure returned by the search endpoint !!!
+                    // Example: assuming the response is an array and the first item has the dtxsid
+                    if (searchResponse && Array.isArray(searchResponse) && searchResponse.length > 0 && searchResponse[0].dtxsid) {
+                         dtxsid = searchResponse[0].dtxsid;
+                         statusDiv.textContent = `Found DTXSID: ${dtxsid}. Fetching details...`;
+                    } else if (searchResponse && searchResponse.dtxsid) { // Alternative structure
+                         dtxsid = searchResponse.dtxsid;
+                         statusDiv.textContent = `Found DTXSID: ${dtxsid}. Fetching details...`;
+                    }
+                     else {
+                        throw new Error(`Could not find DTXSID for CAS RN ${identifier}. Response: ${JSON.stringify(searchResponse)}`);
+                    }
+                } else {
+                    throw new Error("Invalid identifier format. Use CAS RN (e.g., 67-64-1) or DTXSID (e.g., DTXSID7020182).");
+                }
+
+                if (!dtxsid) {
+                     throw new Error("Failed to obtain DTXSID.");
+                }
+
+                // Step 2: Fetch Chemical Details using DTXSID
+                statusDiv.textContent = `Workspaceing Chemical Details for ${dtxsid}...`;
+                // !!! VERIFY/ADJUST this endpoint path !!!
+                const detailsUrl = `${API_BASE_URL}/chemical/details/by-dtxsid/${dtxsid}`;
+                const detailsData = await makeApiCall('Chemical_Details', detailsUrl, fetchedJsonResponses);
+                displayChemicalDetails(detailsData, dtxsid);
+
+                // Step 3: Fetch Hazard Data (including GHS) using DTXSID
+                statusDiv.textContent = `Workspaceing Hazard Data for ${dtxsid}...`;
+                // !!! VERIFY/ADJUST this endpoint path !!!
+                const hazardUrl = `${API_BASE_URL}/hazard/details/by-dtxsid/${dtxsid}`; // Or maybe /hazard/ghs/... ?
+                const hazardData = await makeApiCall('Hazard_Data', hazardUrl, fetchedJsonResponses);
+                displayHazardInfo(hazardData);
+
+                // Step 4: Fetch Physicochemical Property Data using DTXSID
+                statusDiv.textContent = `Workspaceing PhysChem Properties for ${dtxsid}...`;
+                 // !!! VERIFY/ADJUST this endpoint path !!!
+                const physChemUrl = `${API_BASE_URL}/chemical/property/by-dtxsid/${dtxsid}`; // Or maybe /physchem/... ?
+                const physChemData = await makeApiCall('PhysChem_Data', physChemUrl, fetchedJsonResponses);
+                displayPhysChemInfo(physChemData);
+
+                // Step 5: Display Raw JSON
+                 displayRawJson(fetchedJsonResponses);
+
+
+                resultsDiv.style.display = 'block'; // Show results section
+                rawJsonDisplayDiv.style.display = 'block'; // Show JSON section
+
+            } catch (error) {
+                showError(`Error: ${error.message}`);
+                console.error("Fetch error:", error);
+                displayRawJson(fetchedJsonResponses); // Display JSON even if later calls fail
+                 rawJsonDisplayDiv.style.display = 'block';
+            } finally {
+                statusDiv.style.display = 'none'; // Hide loading message
+            }
+        }
+
+        async function makeApiCall(callName, url, jsonStorage) {
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'x-api-key': EPA_API_KEY
+                    }
+                });
+
+                if (!response.ok) {
+                     const errorText = await response.text();
+                     throw new Error(`API call '${callName}' failed: ${response.status} ${response.statusText}. Response: ${errorText}`);
+                }
+
+                const data = await response.json();
+                jsonStorage[callName] = data; // Store successful response
+                return data;
+            } catch (error) {
+                 jsonStorage[callName] = { error: error.message }; // Store error info
+                 throw error; // Re-throw to stop subsequent calls if needed
+            }
+        }
+
+        function displayChemicalDetails(data, dtxsid) {
+            if (!data) {
+                 detailsDtxsid.textContent = dtxsid || 'N/A'; // Show dtxsid even if details fail
+                 detailsName.textContent = 'Error fetching details';
+                 return;
+            };
+
+            // --- Adjust parsing based on actual API response structure ---
+            detailsDtxsid.textContent = data.dtxsid || dtxsid || 'N/A';
+            detailsName.textContent = data.preferredName || 'N/A';
+            detailsFormula.textContent = data.molecularFormula || 'N/A';
+            detailsAvgMass.textContent = data.averageMass ? `${data.averageMass} g/mol` : 'N/A';
+            detailsMonoMass.textContent = data.monoisotopicMass ? `${data.monoisotopicMass} g/mol` : 'N/A';
+
+            // Construct image URL if available (assuming API provides the image URL directly or an ID)
+            // !!! VERIFY/ADJUST this endpoint path for images !!!
+            const imageUrl = `${API_BASE_URL}/chemical/image/by-dtxsid/${dtxsid}`; // Or maybe data.imageUrl?
+            detailsImage.src = imageUrl; // Consider adding API key if needed for image endpoint too
+            detailsImage.style.display = 'block';
+             detailsImage.onerror = () => { detailsImage.style.display = 'none'; } // Hide if image fails to load
+        }
+
+         function displayHazardInfo(data) {
+            if (!data) {
+                ghsPictogramsDiv.textContent = 'Error fetching hazard data.';
+                ghsHStatementsUl.innerHTML = '<li>Error fetching hazard data.</li>';
+                return;
+            }
+
+            // --- GHS data extraction ---
+            // !!! This is highly speculative - Adjust based on the actual hazard API response structure !!!
+            let pictograms = [];
+            let hStatements = [];
+
+            // Example structure assumption 1: data has a 'ghs' object
+            if (data.ghs) {
+                 pictograms = data.ghs.pictograms || []; // Assuming it's an array of codes like "GHS02"
+                 hStatements = data.ghs.hStatements || []; // Assuming it's an array of strings like "H225"
+            }
+            // Example structure assumption 2: data is an array of hazard records
+            else if (Array.isArray(data)) {
+                data.forEach(record => {
+                     if (record.type === 'ghs_pictogram' && record.code) {
+                         pictograms.push(record.code);
+                     }
+                     if (record.type === 'ghs_h_statement' && record.statement) {
+                         hStatements.push(record.statement);
+                     }
+                 });
+            }
+             // Add more parsing logic as needed based on the real API response
+
+            // Display Pictograms
+            const uniquePictograms = [...new Set(pictograms)];
+            if (uniquePictograms.length > 0) {
+                ghsPictogramsDiv.innerHTML = ''; // Clear default
+                uniquePictograms.forEach(code => {
+                    const pictogramInfo = pictogramMap[code];
+                    if (pictogramInfo) {
+                        const img = document.createElement('img');
+                        img.src = pictogramInfo.url;
+                        img.alt = pictogramInfo.alt;
+                        img.title = `${code}: ${pictogramInfo.alt}`;
+                        ghsPictogramsDiv.appendChild(img);
+                    } else {
+                        const span = document.createElement('span');
+                        span.textContent = code;
+                        span.title = "Unmapped GHS Code";
+                        ghsPictogramsDiv.appendChild(span);
+                    }
+                });
+            } else {
+                ghsPictogramsDiv.textContent = 'No GHS pictograms found or extracted.';
+            }
+
+            // Display H-Statements
+             const uniqueHStatements = [...new Set(hStatements)];
+            if (uniqueHStatements.length > 0) {
+                ghsHStatementsUl.innerHTML = ''; // Clear default
+                uniqueHStatements.forEach(stmt => {
+                    const li = document.createElement('li');
+                    li.textContent = stmt;
+                    ghsHStatementsUl.appendChild(li);
+                });
+            } else {
+                ghsHStatementsUl.innerHTML = '<li>No GHS H-statements found or extracted.</li>';
+            }
+        }
+
+        function displayPhysChemInfo(data) {
+             if (!data) {
+                 propLogP.textContent = 'Error fetching property data.';
+                 // Clear others too
+                 propWaterSol.textContent = 'N/A';
+                 propBoilingPt.textContent = 'N/A';
+                 propMeltingPt.textContent = 'N/A';
+                 return;
+            }
+
+            // --- Property data extraction ---
+            // !!! This is speculative - Adjust based on the actual property API response structure !!!
+            // Example: Assuming data is an object where keys are property names
+            // Or it might be an array of { propertyName: '...', value: '...', units: '...' } objects
+
+             const findProp = (propName) => {
+                 // Adjust find logic based on actual structure
+                 if (data && data[propName]) return data[propName];
+                 if (Array.isArray(data)) {
+                     const prop = data.find(p => p.propertyName?.toLowerCase() === propName.toLowerCase());
+                     return prop ? `${prop.value} ${prop.units || ''}`.trim() : null;
+                 }
+                 return null;
+             };
+
+             propLogP.textContent = findProp('logP') || findProp('Octanol-Water Partition Coefficient') || 'N/A';
+             propWaterSol.textContent = findProp('waterSolubility') || findProp('Water Solubility') || 'N/A';
+             propBoilingPt.textContent = findProp('boilingPoint') || findProp('Boiling Point') || 'N/A';
+             propMeltingPt.textContent = findProp('meltingPoint') || findProp('Melting Point') || 'N/A';
+        }
+
+
+        function displayRawJson(jsonData) {
+             jsonOutputDiv.innerHTML = ''; // Clear previous
+             for (const key in jsonData) {
+                 const section = document.createElement('div');
+                 const heading = document.createElement('h4');
+                 heading.textContent = `Response from: ${key.replace(/_/g, ' ')}`; // Make key readable
+                 const pre = document.createElement('pre');
+                 const code = document.createElement('code');
+                 code.textContent = JSON.stringify(jsonData[key], null, 2); // Pretty print JSON
+                 pre.appendChild(code);
+                 section.appendChild(heading);
+                 section.appendChild(pre);
+                 jsonOutputDiv.appendChild(section);
+             }
+        }
+
+        function clearPreviousResults() {
+            resultsDiv.style.display = 'none';
+            rawJsonDisplayDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+            errorDiv.textContent = '';
+            jsonOutputDiv.innerHTML = '';
+
+            // Clear result fields
+            resultIdentifierSpan.textContent = '';
+            detailsDtxsid.textContent = 'N/A';
+            detailsName.textContent = 'N/A';
+            detailsFormula.textContent = 'N/A';
+            detailsAvgMass.textContent = 'N/A';
+            detailsMonoMass.textContent = 'N/A';
+            detailsImage.src = '';
+            detailsImage.style.display = 'none';
+            ghsPictogramsDiv.innerHTML = 'N/A';
+            ghsHStatementsUl.innerHTML = '<li>N/A</li>';
+            propLogP.textContent = 'N/A';
+            propWaterSol.textContent = 'N/A';
+            propBoilingPt.textContent = 'N/A';
+            propMeltingPt.textContent = 'N/A';
+        }
+
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            statusDiv.style.display = 'none'; // Hide loading on error
+        }
+
+    </script>
+
+</body>
+</html>
