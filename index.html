@@ -22,6 +22,8 @@
         dd { margin-left: 20px; margin-bottom: 5px; }
         ul { margin-top: 5px; padding-left: 20px; }
         .note { background-color: #fffde7; padding: 10px; border-left: 4px solid #ffeb3b; margin: 10px 0; }
+        .cors-selector { margin-bottom: 15px; }
+        .cors-selector select { padding: 5px; margin-left: 10px; }
     </style>
 </head>
 <body>
@@ -32,8 +34,17 @@
         <br><strong>Requires a free API key from EPA. See code comments to add your key.</strong>
     </p>
     <div class="note">
-        <p><strong>Note:</strong> This demo uses a CORS proxy (corsproxy.io) to allow API calls from GitHub Pages. 
-        For production use, consider implementing a server-side solution instead.</p>
+        <p><strong>Note:</strong> GitHub Pages requires a CORS proxy to access the EPA API. 
+        If you encounter errors, try selecting a different CORS proxy below:</p>
+        <div class="cors-selector">
+            <label for="corsProxySelect">CORS Proxy:</label>
+            <select id="corsProxySelect">
+                <option value="https://api.allorigins.win/raw?url=">AllOrigins</option>
+                <option value="https://corsproxy.io/?">CORSProxy.io</option>
+                <option value="https://cors-anywhere.herokuapp.com/">CORS Anywhere</option>
+                <option value="no-cors">No Proxy (Direct - might not work)</option>
+            </select>
+        </div>
     </div>
 
     <div>
@@ -96,9 +107,6 @@
         // Updated Base URL for EPA CompTox Dashboard API
         const API_BASE_URL = 'https://api-ccte.epa.gov/data-resolver/v1';
 
-        // CORS Proxy to allow API calls from GitHub Pages
-        const CORS_PROXY = "https://corsproxy.io/?";
-
         // --- GHS Pictogram Mapping ---
         const pictogramMap = {
             "GHS01": { url: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/GHS-pictogram-explos.svg/100px-GHS-pictogram-explos.svg.png", alt: "Exploding Bomb"},
@@ -121,6 +129,7 @@
         const rawJsonDisplayDiv = document.getElementById('rawJsonDisplay');
         const jsonOutputDiv = document.getElementById('jsonOutput');
         const resultIdentifierSpan = document.getElementById('resultIdentifier');
+        const corsProxySelect = document.getElementById('corsProxySelect');
 
         // Result display elements
         const detailsDtxsid = document.getElementById('detailsDtxsid');
@@ -136,7 +145,22 @@
         const propBoilingPt = document.getElementById('propBoilingPt');
         const propMeltingPt = document.getElementById('propMeltingPt');
 
+        // Set default proxy from localStorage if available
+        if (localStorage.getItem('selectedCorsProxy')) {
+            corsProxySelect.value = localStorage.getItem('selectedCorsProxy');
+        }
+
+        // Save proxy selection to localStorage
+        corsProxySelect.addEventListener('change', function() {
+            localStorage.setItem('selectedCorsProxy', this.value);
+        });
+
         fetchButton.addEventListener('click', fetchData);
+
+        function getCurrentCorsProxy() {
+            const proxy = corsProxySelect.value;
+            return proxy === 'no-cors' ? '' : proxy;
+        }
 
         async function fetchData() {
             const identifier = chemIdInput.value.trim();
@@ -211,9 +235,10 @@
                 const physChemData = await makeApiCall('PhysChem_Data', physChemUrl, fetchedJsonResponses);
                 displayPhysChemInfo(physChemData);
 
-                // Set chemical structure image - using CORS proxy for image as well
+                // Set chemical structure image
                 const imageUrl = `${API_BASE_URL}/chemicals/structure-image/${dtxsid}`;
-                detailsImage.src = CORS_PROXY + encodeURIComponent(imageUrl);
+                const corsProxy = getCurrentCorsProxy();
+                detailsImage.src = corsProxy ? corsProxy + encodeURIComponent(imageUrl) : imageUrl;
                 detailsImage.style.display = 'block';
                 detailsImage.onerror = () => { 
                     detailsImage.style.display = 'none';
@@ -224,7 +249,7 @@
                 rawJsonDisplayDiv.style.display = 'block'; // Show JSON section
 
             } catch (error) {
-                showError(`Error: ${error.message}`);
+                showError(`Error: ${error.message}${corsProxySelect.value === 'no-cors' ? ' - Try selecting a CORS proxy from the dropdown.' : ' - Try selecting a different CORS proxy.'}`);
                 console.error("Fetch error:", error);
                 if (Object.keys(fetchedJsonResponses).length > 0) {
                     displayRawJson(fetchedJsonResponses); // Display JSON even if later calls fail
@@ -237,28 +262,44 @@
 
         async function makeApiCall(callName, url, jsonStorage) {
             try {
-                // Use CORS proxy to avoid CORS issues with the EPA API
-                const proxiedUrl = CORS_PROXY + encodeURIComponent(url);
-                
-                const response = await fetch(proxiedUrl, {
+                const corsProxy = getCurrentCorsProxy();
+                // Use CORS proxy if selected
+                const fetchUrl = corsProxy ? corsProxy + encodeURIComponent(url) : url;
+                const fetchOptions = {
                     headers: {
                         'x-api-key': EPA_API_KEY,
                         'Accept': 'application/json'
                     }
-                });
+                };
+                
+                // If direct connection is attempted without a proxy, set mode to 'no-cors'
+                // Note: This will not actually return usable JSON data but may help with resources like images
+                if (!corsProxy) {
+                    fetchOptions.mode = 'cors'; // Try cors first - this might work on some servers
+                }
+                
+                const response = await fetch(fetchUrl, fetchOptions);
 
                 if (!response.ok) {
                     let errorMessage = `API call '${callName}' failed: ${response.status} ${response.statusText}`;
                     try {
                         const errorText = await response.text();
-                        errorMessage += `. Response: ${errorText}`;
+                        if (errorText) {
+                            errorMessage += `. Response: ${errorText.substring(0, 100)}${errorText.length > 100 ? '...' : ''}`;
+                        }
                     } catch (e) {
                         console.error("Could not read error response text", e);
                     }
                     throw new Error(errorMessage);
                 }
 
-                const data = await response.json();
+                let data;
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    throw new Error(`Failed to parse JSON response for ${callName}. This might be a CORS issue. Try a different proxy.`);
+                }
+                
                 jsonStorage[callName] = data; // Store successful response
                 return data;
             } catch (error) {
